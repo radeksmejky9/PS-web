@@ -5,13 +5,14 @@ services:
       - "5000:5000"
     depends_on:
       - mongo
+    volumes:
+      - ./app/uploads:/app/uploads
 
   mongo:
     image: mongo:latest
+    restart: always
     volumes:
       - mongo_data:/data/db
 
 volumes:
   mongo_data:
-
-

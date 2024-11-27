@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+</head>
+
+<body>
+    <h1>Welcome to the IFC File Converter</h1>
+    <h2>Upload IFC File</h2>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+        <label for="file">Select a file (only .ifc files):</label>
+        <input type="file" id="filename" name="file" accept=".ifc" required>
+        <button type="submit">Upload</button>
+    </form>
+    <div id="upload-message"></div>
+    <h2>Uploaded Files</h2>
+    <ul id="file-list"></ul>
+
+    <script>
+        updateFileList();
+        function updateFileList() {
+            fetch('/files')
+                .then(response => response.json())
+                .then(files => {
+                    const fileList = document.getElementById('file-list');
+                    fileList.innerHTML = '';
+                    files.forEach(file => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = file.filename + ' ' + file.path + ' ' + file.uploaded_at;
+                        fileList.appendChild(listItem);
+                    });
+                });
+        }
+
+        document.querySelector('form').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    const messageDiv = document.getElementById('upload-message');
+                    if (data.error) {
+                        messageDiv.textContent = `Error: ${data.error}`;
+                        messageDiv.style.color = 'red';
+                    } else {
+                        messageDiv.textContent = `Success: ${data.message}`;
+                        messageDiv.style.color = 'green';
+                        updateFileList();
+                    }
+                })
+                .catch(error => {
+                    const messageDiv = document.getElementById('upload-message');
+                    messageDiv.textContent = `Error: ${error.message}`;
+                    messageDiv.style.color = 'red';
+                });
+        });
+    </script>
+</body>
+
+</html>
