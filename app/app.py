@@ -1,11 +1,9 @@
 import subprocess
-import logging
 from flask import Flask, jsonify, render_template, request, send_file
 from flask_pymongo import PyMongo
 from werkzeug.utils import secure_filename
 import os
 from bson import ObjectId
-import bpy
 
 app = Flask(__name__)
 
@@ -18,11 +16,17 @@ app.config["IFC_CONVERT_FOLDER"] = "/app/IfcConvert/"
 mongo = PyMongo(app)
 files_collection = mongo.db.files
 
-# Set up basic logging
-logging.basicConfig(level=logging.DEBUG)
-
 
 def allowed_file(filename):
+    """
+    Check if a file has an allowed extension based on the filename.
+
+    Parameters:
+    filename (str): The name of the file to check.
+
+    Returns:
+    bool: True if the file has an allowed extension, False otherwise.
+    """
     return (
         "." in filename
         and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
@@ -30,33 +34,45 @@ def allowed_file(filename):
 
 
 def convert_file_to_dae(filename):
+    """
+    Convert an IFC file to DAE format using IfcConvert.
+
+    This function takes an IFC filename, converts it to DAE format using the IfcConvert tool,
+    and moves the resulting DAE file to the upload folder.
+
+    Parameters:
+    filename (str): The name of the IFC file to convert, without the .ifc extension.
+
+    Returns:
+    tuple: A tuple containing three elements:
+        - str: The path to the generated DAE file.
+        - str: The standard output of the conversion process.
+        - str: The standard error of the conversion process.
+
+    Raises:
+    FileNotFoundError: If the IfcConvert executable or the IFC file is not found.
+    PermissionError: If there's no write permission for the upload folder.
+    RuntimeError: If an error occurs during the DAE conversion process.
+    Exception: For any other unexpected errors.
+    """
     exe_path = os.path.join(os.getcwd(), app.config["IFC_CONVERT_FOLDER"], "IfcConvert")
     ifc_file_path = os.path.join(
         os.getcwd(), app.config["UPLOAD_FOLDER"], filename + ".ifc"
     )
     dae_file_path = os.path.join(os.getcwd(), app.config["TEMP_DIR"], filename + ".dae")
 
-    # Debug: log paths
-    logging.debug(f"Exe Path: {exe_path}")
-    logging.debug(f"IFC File Path: {ifc_file_path}")
-    logging.debug(f"DAE File Path: {dae_file_path}")
-
     if not os.path.exists(exe_path):
-        raise FileNotFoundError("IfcConvert.exe not found.")
+        raise FileNotFoundError("IfcConvert.exe nebyl nalezen.")
 
     if not os.path.exists(ifc_file_path):
-        raise FileNotFoundError("IFC file not found.")
+        raise FileNotFoundError("IFC soubor nebyl nalezen.")
+
+    if not os.access(app.config["UPLOAD_FOLDER"], os.W_OK):
+        raise PermissionError(
+            f"Nemáte oprávnění zapisovat do: {app.config['UPLOAD_FOLDER']}"
+        )
 
     try:
-        # Debug: checking if we have write permissions in the upload folder
-        if not os.access(app.config["UPLOAD_FOLDER"], os.W_OK):
-            logging.error(
-                f"Permission denied for writing to: {app.config['UPLOAD_FOLDER']}"
-            )
-            raise PermissionError(
-                f"Permission denied for writing to: {app.config['UPLOAD_FOLDER']}"
-            )
-
         result = subprocess.run(
             [exe_path, ifc_file_path, dae_file_path, "--use-element-names"],
             capture_output=True,
@@ -64,64 +80,73 @@ def convert_file_to_dae(filename):
             check=True,
         )
         subprocess.run(["mv", dae_file_path, app.config["UPLOAD_FOLDER"]])
-
-        # Debug: log stdout and stderr from the conversion process
-        logging.debug(f"DAE Conversion STDOUT: {result.stdout}")
-        logging.debug(f"DAE Conversion STDERR: {result.stderr}")
-
         return dae_file_path, result.stdout, result.stderr
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error during DAE conversion: {e.stderr}")
         raise RuntimeError(
-            f"An error occurred during DAE conversion: {ifc_file_path} -> {dae_file_path} {e.stderr}"
+            f"Došlo k chybě při DAE konverzi: {ifc_file_path} -> {dae_file_path} {e.stderr}"
         )
     except Exception as e:
-        logging.error(f"Unexpected error during DAE conversion: {str(e)}")
         raise
 
 
 def convert_dae_to_obj(dae_filename):
-    """Converts a DAE file to OBJ using Blender in headless mode."""
+    """
+    Convert a DAE (COLLADA) file to OBJ format using Blender.
+
+    This function takes a DAE filename, uses Blender to import the DAE file,
+    and then exports it as an OBJ file. The conversion is done in the background
+    without opening the Blender GUI.
+
+    Parameters:
+    dae_filename (str): The name of the DAE file to convert, including the .dae extension.
+
+    Returns:
+    str: The file path of the generated OBJ file.
+
+    Raises:
+    RuntimeError: If the OBJ file is not created or if there's an error during the conversion process.
+    Exception: For any other unexpected errors during the conversion process.
+    """
     try:
         obj_filename = dae_filename.replace(".dae", ".obj")
         dae_file_path = os.path.join(app.config["UPLOAD_FOLDER"], dae_filename)
         obj_file_path = os.path.join(app.config["UPLOAD_FOLDER"], obj_filename)
 
-        # Log file paths
-        logging.debug(f"DAE File Path: {dae_file_path}")
-        logging.debug(f"OBJ File Path: {obj_file_path}")
-
-        # Run Blender in headless mode to convert the DAE to OBJ
         blender_command = [
             "blender",
             "--background",
             "--python-expr",
-            f"import bpy; bpy.ops.wm.collada_import(filepath='{dae_file_path}'); bpy.ops.export_scene.obj(filepath='{obj_file_path}')",
+            f"import bpy; bpy.ops.wm.read_factory_settings(use_empty=True); bpy.ops.wm.collada_import(filepath='{dae_file_path}'); bpy.ops.export_scene.obj(filepath='{obj_file_path}')",
         ]
 
-        # Run the Blender command and capture its output
         result = subprocess.run(
             blender_command, capture_output=True, text=True, check=True
         )
 
-        # Log stdout and stderr from the Blender process
-        logging.debug(f"Blender STDOUT: {result.stdout}")
-        logging.debug(f"Blender STDERR: {result.stderr}")
-
-        # Check if the OBJ file was created
         if not os.path.exists(obj_file_path):
-            raise RuntimeError(f"OBJ file not created at: {obj_file_path}")
+            raise RuntimeError(f"OBJ soubor nebyl vytvořen na: {obj_file_path}")
 
         return obj_file_path
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error during OBJ conversion: {e.stderr}")
-        raise RuntimeError(f"An error occurred during OBJ conversion: {e.stderr}")
+        raise RuntimeError(f"Došlo k chybě při konverzi na OBJ: {e.stderr}")
     except Exception as e:
-        logging.error(f"Unexpected error during OBJ conversion: {str(e)}")
         raise
 
 
 def convert_objectid_to_str(file):
+    """
+    Convert the ObjectId of a file document to a string.
+
+    This function takes a file document (typically from MongoDB) and converts
+    its '_id' field from an ObjectId to a string. This is often necessary
+    when preparing documents for JSON serialization.
+
+    Parameters:
+    file (dict): A dictionary representing a file document, containing an '_id' field.
+
+    Returns:
+    dict: The same file document with its '_id' field converted to a string.
+    """
     file["_id"] = str(file["_id"])
     return file
 
@@ -135,11 +160,13 @@ def index():
 def upload():
     uploaded_file = request.files.get("file")
     if not uploaded_file or uploaded_file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "Nebyl vybrán žádný soubor"}), 400
 
     if not allowed_file(uploaded_file.filename):
         return (
-            jsonify({"error": "Invalid file type. Only .ifc files are allowed."}),
+            jsonify(
+                {"error": "Neplatný typ souboru. Jsou povoleny pouze .ifc soubory."}
+            ),
             400,
         )
 
@@ -147,7 +174,7 @@ def upload():
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], safe_filename)
 
     if os.path.exists(file_path):
-        return jsonify({"error": "File already exists"}), 400
+        return jsonify({"error": "Soubor již existuje"}), 400
 
     uploaded_file.save(file_path)
 
@@ -158,15 +185,11 @@ def upload():
     file_metadata["_id"] = str(file_record.inserted_id)
 
     try:
-        # Convert IFC to DAE
         dae_file_path, conversion_output, conversion_error = convert_file_to_dae(
             file_metadata["filename"]
         )
-
-        # Convert DAE to OBJ
         obj_file_path = convert_dae_to_obj(os.path.basename(dae_file_path))
 
-        # Update the file metadata in the database
         files_collection.update_one(
             {"_id": file_record.inserted_id},
             {
@@ -180,7 +203,7 @@ def upload():
         return (
             jsonify(
                 {
-                    "message": "File uploaded and converted successfully!",
+                    "message": "Soubor byl úspěšně nahrán a převeden!",
                     "file": file_metadata,
                     "dae_conversion_output": conversion_output,
                     "dae_conversion_error": conversion_error,
@@ -190,7 +213,6 @@ def upload():
             201,
         )
     except Exception as error:
-        logging.error(f"Error during file upload and conversion: {str(error)}")
         return jsonify({"error": str(error)}), 500
 
 
@@ -211,14 +233,14 @@ def get_file(file_id):
             "filename": file_record["filename"],
         }
         return jsonify(file_info), 200
-    return jsonify({"error": "File not found"}), 404
+    return jsonify({"error": "Soubor nebyl nalezen"}), 404
 
 
 @app.route("/files/<file_id>", methods=["DELETE"])
 def delete_file(file_id):
     file_record = files_collection.find_one({"_id": ObjectId(file_id)})
     if not file_record:
-        return jsonify({"error": "File not found"}), 404
+        return jsonify({"error": "Soubor nebyl nalezen"}), 404
     filename = file_record["filename"]
     file_paths = [
         os.path.join(app.config["UPLOAD_FOLDER"], f"{filename}.ifc"),
@@ -230,7 +252,7 @@ def delete_file(file_id):
             os.remove(file_path)
     files_collection.delete_one({"_id": ObjectId(file_id)})
 
-    return jsonify({"success": "File and metadata deleted successfully!"}), 200
+    return jsonify({"success": "Soubor a metadata byly úspěšně odstraněny!"}), 200
 
 
 @app.route("/files/<id>/download/<extension>", methods=["GET"])
@@ -240,7 +262,7 @@ def download(id, extension):
         return (
             jsonify(
                 {
-                    "error": f"Invalid extension. Only {', '.join(valid_extensions)} are allowed."
+                    "error": f"Neplatná přípona. Jsou povoleny pouze {', '.join(valid_extensions)}."
                 }
             ),
             400,
@@ -255,17 +277,14 @@ def download(id, extension):
             if os.path.exists(file_path):
                 return send_file(file_path, as_attachment=True)
             else:
-                return jsonify({"error": f"{extension.upper()} file not found."}), 404
+                return (
+                    jsonify({"error": f"{extension.upper()} soubor nebyl nalezen."}),
+                    404,
+                )
         else:
-            return jsonify({"error": "Filename not found in database."}), 404
+            return jsonify({"error": "Název souboru nebyl nalezen v databázi."}), 404
     else:
-        return jsonify({"error": "File not found."}), 404
-
-
-@app.route("/dropdb")
-def dropdb():
-    files_collection.drop()
-    return "Database dropped!"
+        return jsonify({"error": "Soubor nebyl nalezen."}), 404
 
 
 if __name__ == "__main__":
