@@ -27,54 +27,59 @@
 </head>
 
 <body class="bg-gray-50 text-gray-800">
-    <div class="container mx-auto max-w-6xl p-6">
-        <header class="text-center mb-10">
+    <div class="w-full">
+        <header class="text-center my-6 mb-10">
             <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight">IFC Konvertor a Unity Viewer</h1>
         </header>
+        <div class="flex flex-col md:flex-row mx-10 gap-6">
+            <div>
+                <section class="bg-gray-100 shadow rounded-lg p-8 mb-4">
+                    <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">Nahrajte svůj IFC soubor</h2>
+                    <form id="uploadForm" enctype="multipart/form-data" class="space-y-6">
+                        <div class="mb-4">
+                            <label class="block text-lg font-medium text-gray-700" for="ifcFile">Vyberte IFC
+                                soubor</label>
+                            <label for="ifcFile"
+                                class="block w-full p-2 text-sm text-white bg-gray-500 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-600 focus:outline-none">
+                                <span id="ifcFileName">Vyberte IFC soubor</span>
+                            </label>
+                            <input class="hidden" id="ifcFile" name="file" type="file" accept=".ifc" required
+                                onchange="displayFileName('ifcFile')">
+                        </div>
+                        <button type="submit"
+                            class="w-full bg-gray-500 text-white font-semibold py-2 rounded-md shadow-md hover:bg-gray-600 transition">
+                            Nahrát soubor
+                        </button>
+                    </form>
+                    <div id="upload-message" class="mt-4 text-center text-lg"></div>
+                </section>
 
-        <section class="bg-gray-100 shadow rounded-lg p-8 mb-10">
-            <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">Nahrajte svůj IFC soubor</h2>
-            <form id="uploadForm" enctype="multipart/form-data" class="space-y-6">
-                <div class="mb-6">
-                    <label class="block mb-2 text-lg font-medium text-gray-700" for="ifcFile">Vyberte IFC soubor</label>
-                    <label for="ifcFile"
-                        class="block w-full p-2 text-sm text-white bg-gray-500 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-600 focus:outline-none">
-                        <span id="ifcFileName">Vyberte IFC soubor</span>
-                    </label>
-                    <input class="hidden" id="ifcFile" name="file" type="file" accept=".ifc" required
-                        onchange="displayFileName('ifcFile')">
-                </div>
-                <button type="submit"
-                    class="w-full bg-gray-500 text-white font-semibold py-2 rounded-md shadow-md hover:bg-gray-600 transition">
-                    Nahrát soubor
-                </button>
-            </form>
-            <div id="upload-message" class="mt-4 text-center text-lg"></div>
-        </section>
-
-        <section class="bg-gray-100 shadow rounded-lg p-8 mb-10">
-            <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">Nahrané soubory</h2>
-            <div id="file-list" class="space-y-5"></div>
-        </section>
-
-        <section class="bg-gray-100 shadow rounded-lg p-8">
-            <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">3D Prohlížeč (Unity WebGL)</h2>
-            <div id="unity-container" class="unity-desktop mx-auto">
-                <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
-                <div id="unity-loading-bar">
-                    <div id="unity-logo"></div>
-                    <div id="unity-progress-bar-empty">
-                        <div id="unity-progress-bar-full"></div>
-                    </div>
-                </div>
-                <div id="unity-warning"></div>
-                <div id="unity-footer">
-                    <div id="unity-webgl-logo"></div>
-                    <div id="unity-fullscreen-button"></div>
-                    <div id="unity-build-title">PS-webgl</div>
-                </div>
+                <section class="bg-gray-100 shadow rounded-lg p-8 mb-10">
+                    <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">Nahrané soubory</h2>
+                    <div id="file-list" class="space-y-5"></div>
+                </section>
             </div>
-        </section>
+            <div>
+                <section class="bg-gray-100 shadow rounded-lg p-8">
+                    <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">3D Prohlížeč (Unity WebGL)</h2>
+                    <div id="unity-container" class="unity-desktop mx-auto">
+                        <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
+                        <div id="unity-loading-bar">
+                            <div id="unity-logo"></div>
+                            <div id="unity-progress-bar-empty">
+                                <div id="unity-progress-bar-full"></div>
+                            </div>
+                        </div>
+                        <div id="unity-warning"></div>
+                        <div id="unity-footer">
+                            <div id="unity-webgl-logo"></div>
+                            <div id="unity-fullscreen-button"></div>
+                            <div id="unity-build-title">PS-webgl</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
     </div>
 
 </body>
@@ -93,7 +98,7 @@
                     `;
             uploadMessage.className = "text-center";
 
-            fetch('/upload', {
+            fetch('/files', {
                 method: 'POST',
                 body: formData
             })
@@ -127,28 +132,31 @@
                 files.forEach(file => {
                     const fileLayout = document.createElement('div');
                     fileLayout.className = 'bg-white p-4 rounded-md shadow-md hover:shadow-lg transition flex items-center justify-between';
-
                     fileLayout.innerHTML = `
-                        <div class="text-lg font-medium text-gray-800">${file.filename}</div>
-                        <div class="flex flex-wrap gap-2">
+                        <div>
+                            <div class="text-lg font-medium text-gray-800 pb-2">${file.filename}</div>
                             <button onclick="loadInViewer('${file._id}')"
-                                class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition">
+                                class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 shadow transition">
                                 Zobrazit v 3D prohlížeči
                             </button>
-                            <a href="/files/${file._id}/download/ifc"
-                                class="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 transition">
-                                Stáhnout IFC
-                            </a>
-                            <a href="/files/${file._id}/download/dae"
-                                class="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 transition">
-                                Stáhnout DAE
-                            </a>
-                            <a href="/files/${file._id}/download/obj"
-                                class="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 transition">
-                                Stáhnout OBJ
-                            </a>
+
+                            <div class="grid grid-cols-3 gap-3 my-2">
+                                <a href="/files/${file._id}/download/ifc"
+                                    class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-center shadow transition">
+                                    Stáhnout IFC
+                                </a>
+                                <a href="/files/${file._id}/download/dae"
+                                    class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-center shadow transition">
+                                    Stáhnout DAE
+                                </a>
+                                <a href="/files/${file._id}/download/obj"
+                                    class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-center shadow transition">
+                                    Stáhnout OBJ
+                                </a>
+                            </div>
+
                             <button onclick="deleteFile('${file._id}')"
-                                class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition">
+                                class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 shadow transition">
                                 Smazat
                             </button>
                         </div>
@@ -164,10 +172,12 @@
     }
 
     function loadInViewer(fileId) {
-        const url = `http://localhost:5000/files/` + fileId + `/download/obj`;
+        const baseUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+        const url = `${baseUrl}/files/${fileId}/download/obj`;
+        const messageParameter = fileId + "," + url;
+        console.log(messageParameter);
         if (typeof unityInstance !== "undefined") {
-            unityInstance.SendMessage("Model", "LoadModelFromJS", url);
-            unityInstance.SendMessage("TestCube", "TestCubeWithParameter", url);
+            unityInstance.SendMessage("Model", "LoadModelFromJS", messageParameter);
         }
     }
 
@@ -180,6 +190,30 @@
             fileNameDisplay.textContent = "Vyberte soubor";
         }
     }
+
+    function saveModel(fileId, file) {
+        if (confirm("Opravdu chcete tento soubor přeuložit?")) {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            fetch(`/files/${fileId}`, {
+                method: 'PUT',
+                body: formData,
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateFileList();
+                    } else {
+                        alert('Chyba při přeukládání souboru: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Chyba: ' + error.message);
+                });
+        }
+    }
+
 
     function deleteFile(fileId) {
         if (confirm("Opravdu chcete tento soubor smazat?")) {

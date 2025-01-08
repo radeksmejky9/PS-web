@@ -4,6 +4,7 @@ from flask_pymongo import PyMongo
 from werkzeug.utils import secure_filename
 import os
 from bson import ObjectId
+from flask_cors import CORS
 
 app = Flask(__name__)
 
@@ -14,6 +15,7 @@ app.config["TEMP_DIR"] = "/app/"
 app.config["IFC_CONVERT_FOLDER"] = "/app/IfcConvert/"
 
 mongo = PyMongo(app)
+CORS(app)
 files_collection = mongo.db.files
 
 
@@ -156,12 +158,11 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/upload", methods=["POST"])
+@app.route("/files", methods=["POST"])
 def upload():
     uploaded_file = request.files.get("file")
     if not uploaded_file or uploaded_file.filename == "":
         return jsonify({"error": "Nebyl vybrán žádný soubor"}), 400
-
     if not allowed_file(uploaded_file.filename):
         return (
             jsonify(
@@ -171,22 +172,20 @@ def upload():
         )
 
     safe_filename = secure_filename(uploaded_file.filename)
-    file_path = os.path.join(app.config["UPLOAD_FOLDER"], safe_filename)
-
-    if os.path.exists(file_path):
-        return jsonify({"error": "Soubor již existuje"}), 400
-
-    uploaded_file.save(file_path)
-
     file_metadata = {
         "filename": safe_filename.rsplit(".", 1)[0],
     }
     file_record = files_collection.insert_one(file_metadata)
     file_metadata["_id"] = str(file_record.inserted_id)
 
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file_metadata["_id"] + ".ifc")
+    if os.path.exists(file_path):
+        return jsonify({"error": "Soubor již existuje"}), 400
+    uploaded_file.save(file_path)
+
     try:
         dae_file_path, conversion_output, conversion_error = convert_file_to_dae(
-            file_metadata["filename"]
+            file_metadata["_id"]
         )
         obj_file_path = convert_dae_to_obj(os.path.basename(dae_file_path))
 
@@ -216,6 +215,21 @@ def upload():
         return jsonify({"error": str(error)}), 500
 
 
+@app.route("/files/<file_id>", methods=["PUT"])
+def update_file(file_id):
+    file_data = request.data
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file_id + ".obj")
+    if file_data:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            with open(file_path, "wb") as f:
+                f.write(file_data)
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": "No file to replace"})
+    else:
+        return jsonify({"success": False, "error": "No file uploaded"})
+
+
 @app.route("/files", methods=["GET"])
 def get_files():
     files = files_collection.find()
@@ -241,11 +255,10 @@ def delete_file(file_id):
     file_record = files_collection.find_one({"_id": ObjectId(file_id)})
     if not file_record:
         return jsonify({"error": "Soubor nebyl nalezen"}), 404
-    filename = file_record["filename"]
     file_paths = [
-        os.path.join(app.config["UPLOAD_FOLDER"], f"{filename}.ifc"),
-        os.path.join(app.config["UPLOAD_FOLDER"], f"{filename}.dae"),
-        os.path.join(app.config["UPLOAD_FOLDER"], f"{filename}.obj"),
+        os.path.join(app.config["UPLOAD_FOLDER"], f"{file_id}.ifc"),
+        os.path.join(app.config["UPLOAD_FOLDER"], f"{file_id}.dae"),
+        os.path.join(app.config["UPLOAD_FOLDER"], f"{file_id}.obj"),
     ]
     for file_path in file_paths:
         if os.path.exists(file_path):
@@ -269,20 +282,14 @@ def download(id, extension):
         )
     file = files_collection.find_one({"_id": ObjectId(id)})
     if file:
-        filename = file.get("filename")
-        if filename:
-            file_path = os.path.join(
-                app.config["UPLOAD_FOLDER"], f"{filename}.{extension}"
-            )
-            if os.path.exists(file_path):
-                return send_file(file_path, as_attachment=True)
-            else:
-                return (
-                    jsonify({"error": f"{extension.upper()} soubor nebyl nalezen."}),
-                    404,
-                )
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{id}.{extension}")
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True)
         else:
-            return jsonify({"error": "Název souboru nebyl nalezen v databázi."}), 404
+            return (
+                jsonify({"error": f"{extension.upper()} soubor nebyl nalezen."}),
+                404,
+            )
     else:
         return jsonify({"error": "Soubor nebyl nalezen."}), 404
 
