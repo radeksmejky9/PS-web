@@ -1,8 +1,10 @@
 import subprocess
+import traceback
 from flask import Flask, jsonify, render_template, request, send_file
 from flask_pymongo import PyMongo
 from werkzeug.utils import secure_filename
 import os
+import re
 from bson import ObjectId
 from flask_cors import CORS
 
@@ -153,9 +155,74 @@ def convert_objectid_to_str(file):
     return file
 
 
+def inject_ids_into_obj(obj_file_path):
+    """
+    Add unique IDs to object names in an OBJ file.
+    """
+    id_counter = 1
+    updated_lines = []
+
+    with open(obj_file_path, "r") as file:
+        lines = file.readlines()
+
+    for line in lines:
+        if line.startswith("o "):
+            object_name = line.strip().split(" ")[1]
+            new_object_name = f"{object_name}:_ID{id_counter}_:"
+            updated_lines.append(f"o {new_object_name}\n")
+            id_counter += 1
+        else:
+            updated_lines.append(line)
+
+    with open(obj_file_path, "w") as file:
+        file.writelines(updated_lines)
+
+
+def update_obj_file(file_path, updates):
+    """
+    Update the names of objects in an OBJ file based on given updates.
+
+    This function reads an OBJ file specified by `file_path`, iterates through the updates,
+    and modifies the names of objects in the file based on the provided updates. The updates
+    are specified as a list of dictionaries, where each dictionary contains an 'id' and a 'name'.
+    The function searches for objects in the OBJ file with matching IDs and replaces their names
+    with the new names provided in the updates.
+
+    Parameters:
+    file_path (str): The path to the OBJ file to be updated.
+    updates (list): A list of dictionaries, where each dictionary contains an 'id' and a 'name'.
+        The 'id' represents the ID of the object to be updated, and the 'name' represents the
+        new name for the object.
+
+    Returns:
+    None. The function modifies the OBJ file in-place.
+    """
+    with open(file_path, "r") as file:
+        lines = file.readlines()
+
+    for update in updates:
+        model_id = f":_ID{update['id']}_:"
+        new_name = update["name"]
+
+        for i, line in enumerate(lines):
+            if line.startswith("o") and model_id in line:
+                lines[i] = f"o {new_name}\n"
+                break
+
+    with open(file_path, "w") as file:
+        file.writelines(lines)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     return render_template("index.html")
+
+
+@app.route("/files", methods=["GET"])
+def get_files():
+    files = files_collection.find()
+    file_list = [convert_objectid_to_str(file) for file in files]
+    return jsonify(file_list), 200
 
 
 @app.route("/files", methods=["POST"])
@@ -189,6 +256,8 @@ def upload():
         )
         obj_file_path = convert_dae_to_obj(os.path.basename(dae_file_path))
 
+        inject_ids_into_obj(obj_file_path)
+
         files_collection.update_one(
             {"_id": file_record.inserted_id},
             {
@@ -216,25 +285,15 @@ def upload():
 
 
 @app.route("/files/<file_id>", methods=["PUT"])
-def update_file(file_id):
-    file_data = request.data
-    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file_id + ".obj")
-    if file_data:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            with open(file_path, "wb") as f:
-                f.write(file_data)
-            return jsonify({"success": True})
-        return jsonify({"success": False, "error": "No file to replace"})
-    else:
-        return jsonify({"success": False, "error": "No file uploaded"})
+def edit_file(file_id):
+    data = request.get_json()
+    updates = data.get("updates", [])
 
+    obj_file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_id}.obj")
 
-@app.route("/files", methods=["GET"])
-def get_files():
-    files = files_collection.find()
-    file_list = [convert_objectid_to_str(file) for file in files]
-    return jsonify(file_list), 200
+    update_obj_file(obj_file_path, updates)
+
+    return jsonify({"status": "success", "file_id": file_id}), 200
 
 
 @app.route("/files/<file_id>", methods=["GET"])
