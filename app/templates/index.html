@@ -24,6 +24,8 @@
             }
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
 </head>
 
 <body class="bg-gray-50 text-gray-800">
@@ -32,7 +34,7 @@
             <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight">IFC Konvertor a Unity Viewer</h1>
         </header>
         <div class="flex flex-col md:flex-row mx-10 gap-6">
-            <div>
+            <div class="flex-1">
                 <section class="bg-gray-100 shadow rounded-lg p-8 mb-4">
                     <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">Nahrajte svůj IFC soubor</h2>
                     <form id="uploadForm" enctype="multipart/form-data" class="space-y-6">
@@ -59,11 +61,12 @@
                     <div id="file-list" class="space-y-5"></div>
                 </section>
             </div>
-            <div>
-                <section class="bg-gray-100 shadow rounded-lg p-8">
+
+            <div class="flex-1">
+                <section class="bg-gray-100 shadow rounded-lg p-8 mb-6">
                     <h2 class="text-2xl font-bold text-gray-700 text-center mb-6">3D Prohlížeč (Unity WebGL)</h2>
-                    <div id="unity-container" class="unity-desktop mx-auto">
-                        <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
+                    <div id="unity-container" class="unity-desktop mx-auto mb-4">
+                        <canvas id="unity-canvas" width="960" height="600" tabindex="-1"></canvas>
                         <div id="unity-loading-bar">
                             <div id="unity-logo"></div>
                             <div id="unity-progress-bar-empty">
@@ -74,17 +77,46 @@
                         <div id="unity-footer">
                             <div id="unity-webgl-logo"></div>
                             <div id="unity-fullscreen-button"></div>
-                            <div id="unity-build-title">PS-webgl</div>
                         </div>
+                    </div>
+
+                    <div class="flex flex-col gap-4">
+                        <div>
+                            <label for="building" class="block text-sm font-medium text-gray-700">Název budovy</label>
+                            <input type="text" id="building" placeholder="DCUK" onchange="handleChange()"
+                                class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label for="room" class="block text-sm font-medium text-gray-700">Název místnosti</label>
+                            <input type="text" id="room" placeholder="Malá zasedačka" onchange="handleChange()"
+                                class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+
+                </section>
+
+                <section class="bg-gray-100 shadow rounded-lg p-8 mb-6">
+                    <div class="relative w-full pb-4 mb-8">
+                        <h2
+                            class="text-2xl font-bold text-gray-700 text-center mb-6 absolute top-0 left-1/2 transform -translate-x-1/2">
+                            QR
+                            Kódy</h2>
+                        <a id="AllQRDownload" href="" download="qr_codes.zip"
+                            class="bg-blue-500 text-white py-2 px-4 rounded-md shadow-md hover:bg-blue-600 absolute top-0 right-0">
+                            Stáhnout všechny QR kódy
+                        </a>
+                    </div>
+                    <div id="qrCodeContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
                     </div>
                 </section>
             </div>
         </div>
     </div>
-
 </body>
 
 <script>
+    var lastUsedFileId;
+    let lastUpload = {};
     document.addEventListener("DOMContentLoaded", function () {
         updateFileList();
 
@@ -171,16 +203,6 @@
             });
     }
 
-    function loadInViewer(fileId) {
-        const baseUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
-        const url = `${baseUrl}/files/${fileId}/download/obj`;
-        const messageParameter = fileId + "," + url;
-        console.log(messageParameter);
-        if (typeof unityInstance !== "undefined") {
-            unityInstance.SendMessage("Model", "LoadModelFromJS", messageParameter);
-        }
-    }
-
     function displayFileName(inputId) {
         const fileInput = document.getElementById(inputId);
         const fileNameDisplay = document.getElementById(inputId + "Name");
@@ -214,8 +236,8 @@
         }
     }
 
-
     function deleteFile(fileId) {
+
         if (confirm("Opravdu chcete tento soubor smazat?")) {
             fetch(`/files/${fileId}`, { method: 'DELETE' })
                 .then(response => response.json())
@@ -231,6 +253,159 @@
                 });
         }
     }
+    function fetchQRCodes(fileId) {
+        const qrCodeContainer = document.getElementById("qrCodeContainer");
+        qrCodeContainer.innerHTML = "";
+        const loadingDiv = document.createElement("div");
+        loadingDiv.classList.add("flex", "justify-center", "items-center", "my-6");
+        loadingDiv.innerHTML = `<div class="spinner"></div>`;
+        qrCodeContainer.appendChild(loadingDiv);
+
+        fetch(`/qrcodes/${fileId}`)
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error(response.status);
+                }
+            })
+            .then(data => {
+                loadingDiv.remove();
+                console.log(data);
+                if (data) {
+                    data.forEach(qrCode => {
+                        const baseUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+                        const qrCardHtml = `
+            <div class="relative bg-white shadow rounded-lg p-4 mb-4">
+                <div class="bg-gray-300 rounded mx-auto mb-4">
+                    <img src="${baseUrl + "/qrcodes/" + qrCode._id + "/download"}" alt="QR Code" class="w-full h-full object-cover">
+                </div>
+                <button class="absolute top-1 right-1 mt-2 bg-red-600 rounded-md p-2 text-white" onclick="removeQR('${qrCode._id}')">
+                    <svg class="w-6 h-6 text-white" aria-hidden="true"
+                        xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor"
+                        viewBox="0 0 24 24">
+                        <path fill-rule="evenodd"
+                            d="M8.586 2.586A2 2 0 0 1 10 2h4a2 2 0 0 1 2 2v2h3a1 1 0 1 1 0 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a1 1 0 0 1 0-2h3V4a2 2 0 0 1 .586-1.414ZM10 6h4V4h-4v2Zm1 4a1 1 0 1 0-2 0v8a1 1 0 1 0 2 0v-8Zm4 0a1 1 0 1 0-2 0v8a1 1 0 1 0 2 0v-8Z" clip-rule="evenodd"/>
+                    </svg>
+                </button>
+                <div class="flex justify-center">
+                    <a href="${baseUrl + "/qrcodes/" + qrCode._id + "/download"}" download="qr_code.png" class="bg-blue-500 text-white py-2 px-4 rounded-md shadow-md hover:bg-blue-600">
+                        Stáhnout QR
+                    </a>
+                </div>
+            </div>
+        `;
+                        qrCodeContainer.insertAdjacentHTML('beforeend', qrCardHtml);
+                    });
+                } else {
+                    qrCodeContainer.innerHTML = `<p class="text-gray-500">Nebyly ještě vygenerovány žádné QR kódy...</p>`;
+                }
+
+            })
+            .catch(error => {
+                console.error('Error fetching QR codes:', error);
+
+                loadingDiv.remove();
+
+                if (error.message === '404') {
+                    qrCodeContainer.innerHTML = `<p class="text-gray-500">Nebyly ještě vygenerovány žádné QR kódy...</p>`;
+                } else {
+                    qrCodeContainer.innerHTML = `<p class="text-red-500">Chyba při získávání QR kódů. Zkuste to znovu.</p>`;
+                }
+            });
+    }
+
+
+    function loadInViewer(fileId) {
+        const baseUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+        const url = `${baseUrl}/files/${fileId}/download/obj`;
+        const messageParameter = fileId + "," + url;
+        lastUsedFileId = fileId;
+
+        if (typeof unityInstance !== "undefined") {
+            unityInstance.SendMessage("Model", "LoadModelFromJS", messageParameter);
+        }
+        document.getElementById("AllQRDownload").setAttribute("href", baseUrl + "/qrcodes/" + fileId + "/downloadall");
+        fetchQRCodes(fileId);
+    }
+
+    function UploadQR(jsonString) {
+        const jsonData = JSON.parse(jsonString);
+        const { position, rotation, uid: fileId } = jsonData;
+
+        const { x, y, z } = position || {};
+        const { y: yrot } = rotation || {};
+        lastUsedFileId = fileId;
+        if (isNaN(x) || isNaN(y) || isNaN(z) || isNaN(yrot)) {
+            alert("Invalid coordinates or rotation values.");
+            return;
+        }
+
+        const building = document.getElementById("building").value;
+        const room = document.getElementById("room").value;
+
+        const baseUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+
+        const url = `${baseUrl}/files/${fileId}/download/obj`;
+
+        const data = {
+            building: building,
+            room: room,
+            x: x,
+            y: y,
+            z: z,
+            yrot: yrot,
+            file_id: fileId,
+            file_url: url
+        };
+
+        fetch(`/qrcodes`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(`Error: ${data.error}`);
+                } else {
+                    console.log(`QR code generated successfully!`);
+                    console.log(data);
+                    fetchQRCodes(lastUsedFileId);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+    }
+
+    function removeQR(qrId) {
+        const confirmed = window.confirm("Opravdu chcete smazat toto QR?");
+
+        if (!confirmed) {
+            return;
+        }
+
+        fetch(`/qrcodes/${qrId}`, {
+            method: "DELETE",
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(`Error: ${data.error}`);
+                } else {
+                    console.log(`QR code removed successfully!`);
+                    fetchQRCodes(lastUsedFileId);
+                    console.log(data);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+    }
+
 
     var container = document.querySelector("#unity-container");
     var canvas = document.querySelector("#unity-canvas");

@@ -1,3 +1,4 @@
+import base64
 import subprocess
 import traceback
 from flask import Flask, jsonify, render_template, request, send_file
@@ -5,6 +6,10 @@ from flask_pymongo import PyMongo
 from werkzeug.utils import secure_filename
 import os
 import re
+import zipfile
+import io
+from PIL import Image, ImageDraw, ImageFont
+import qrcode
 from bson import ObjectId
 from flask_cors import CORS
 
@@ -15,10 +20,10 @@ app.config["ALLOWED_EXTENSIONS"] = {"ifc"}
 app.config["UPLOAD_FOLDER"] = "/app/uploads/"
 app.config["TEMP_DIR"] = "/app/"
 app.config["IFC_CONVERT_FOLDER"] = "/app/IfcConvert/"
-
 mongo = PyMongo(app)
 CORS(app)
 files_collection = mongo.db.files
+qr_collection = mongo.db.qrcodes
 
 
 def allowed_file(filename):
@@ -258,16 +263,7 @@ def upload():
 
         inject_ids_into_obj(obj_file_path)
 
-        files_collection.update_one(
-            {"_id": file_record.inserted_id},
-            {
-                "$set": {
-                    "dae_file_path": dae_file_path,
-                    "obj_file_path": obj_file_path,
-                }
-            },
-        )
-
+        # Return the response without storing file paths in the database
         return (
             jsonify(
                 {
@@ -327,8 +323,8 @@ def delete_file(file_id):
     return jsonify({"success": "Soubor a metadata byly úspěšně odstraněny!"}), 200
 
 
-@app.route("/files/<id>/download/<extension>", methods=["GET"])
-def download(id, extension):
+@app.route("/files/<file_id>/download/<extension>", methods=["GET"])
+def download(file_id, extension):
     valid_extensions = ["obj", "dae", "ifc"]
     if extension not in valid_extensions:
         return (
@@ -339,9 +335,9 @@ def download(id, extension):
             ),
             400,
         )
-    file = files_collection.find_one({"_id": ObjectId(id)})
+    file = files_collection.find_one({"_id": ObjectId(file_id)})
     if file:
-        file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{id}.{extension}")
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{file_id}.{extension}")
         if os.path.exists(file_path):
             return send_file(file_path, as_attachment=True)
         else:
@@ -351,6 +347,173 @@ def download(id, extension):
             )
     else:
         return jsonify({"error": "Soubor nebyl nalezen."}), 404
+
+
+@app.route("/qrcodes/<file_id>", methods=["GET"])
+def get_qrcodes_by_file(file_id):
+
+    try:
+        qr_codes = qr_collection.find({"file_id": file_id})
+        qr_codes_list = list(qr_codes)
+
+        if not qr_codes_list:
+            return jsonify({"error": "No QR codes found for this file."}), 404
+        qr_codes_list = [convert_objectid_to_str(_id) for _id in qr_codes_list]
+
+        return jsonify(qr_codes_list), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/qrcodes", methods=["POST"])
+def upload_qr():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "Missing JSON data"}), 400
+
+        x = data.get("x")
+        y = data.get("y")
+        z = data.get("z")
+        yrot = data.get("yrot")
+        room = data.get("room", "Default Room")
+        building = data.get("building", "Default Building")
+        file_id = str(data.get("file_id"))
+        file_url = data.get("file_url")
+
+        if not all([x, y, z, yrot, file_id]):
+            return jsonify({"error": "Missing required parameters"}), 400
+        qr_metadata = {
+            "building": building,
+            "room": room,
+            "x": x,
+            "y": y,
+            "z": z,
+            "yrot": yrot,
+            "file_id": file_id,
+            "file_url": file_url,
+        }
+        qr_record = qr_collection.insert_one(qr_metadata)
+        qr_metadata["_id"] = str(qr_record.inserted_id)
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,
+            box_size=10,
+            border=4,
+        )
+
+        data_string = f"{building};{room};{int(x * 100)};{int(y * 100)};{int(z * 100)};{int(yrot * 100)};{file_url}"
+        qr.add_data(base64.b64encode(data_string.encode()).decode())
+        qr.make(fit=True)
+
+        qr_image = qr.make_image(fill_color="black", back_color="white")
+        qr_image = qr_image.convert("RGB")
+
+        draw = ImageDraw.Draw(qr_image)
+        font = ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40
+        )
+
+        building_name = building if building else "Default"
+        room_name = room if room else "Default"
+
+        header_text = f"{building_name}\n{room_name}"
+
+        qr_width, qr_height = qr_image.size
+        text_bbox = draw.textbbox((0, 0), header_text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+
+        top_margin = text_height + 30
+
+        total_height = top_margin + qr_height
+        output_image = Image.new("RGB", (qr_width, total_height), color="white")
+
+        text_x = (qr_width - text_width) // 2
+        text_y = 20
+
+        draw = ImageDraw.Draw(output_image)
+        draw.text((text_x, text_y), building_name, font=font, fill="black")
+        draw.text((text_x, text_y + 40), room_name, font=font, fill="black")
+        output_image.paste(qr_image, (0, top_margin))
+
+        qr_image_path = os.path.join(
+            app.config["UPLOAD_FOLDER"], f"{qr_metadata['_id']}.png"
+        )
+        output_image.save(qr_image_path)
+
+        return (
+            jsonify(
+                {
+                    "message": "QR code generated successfully",
+                    "qr_metadata": qr_metadata,
+                    "qr_image_url": f"/uploads/{qr_metadata['_id']}.png",
+                }
+            ),
+            201,
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/qrcodes/<qr_id>/download", methods=["GET"])
+def get_qrcode(qr_id):
+    try:
+        qr_image_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{qr_id}.png")
+        if not os.path.exists(qr_image_path):
+            return jsonify({"error": "QR code not found"}), 404
+        return send_file(qr_image_path, mimetype="image/png")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/qrcodes/<file_id>/downloadall", methods=["GET"])
+def get_qrcodes_by_file_id(file_id):
+    try:
+        qr_codes = qr_collection.find({"file_id": file_id})
+        if not qr_codes:
+            return jsonify({"error": "No QR codes found for the given file_id"}), 404
+        zip_stream = io.BytesIO()
+        with zipfile.ZipFile(zip_stream, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for qr_metadata in qr_codes:
+                qr_id = qr_metadata["_id"]
+                qr_image_path = os.path.join(
+                    app.config["UPLOAD_FOLDER"], f"{qr_id}.png"
+                )
+
+                if os.path.exists(qr_image_path):
+                    with open(qr_image_path, "rb") as qr_image_file:
+                        zipf.writestr(f"{qr_id}.png", qr_image_file.read())
+                else:
+                    continue
+        zip_stream.seek(0)
+        return send_file(
+            zip_stream,
+            as_attachment=True,
+            download_name="qrcodes.zip",
+            mimetype="application/zip",
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/qrcodes/<qr_id>", methods=["DELETE"])
+def delete_qrcode(qr_id):
+    try:
+        qr_record = qr_collection.find_one({"_id": ObjectId(qr_id)})
+        if qr_record:
+            qr_image_path = os.path.join(app.config["UPLOAD_FOLDER"], f"{qr_id}.png")
+            if os.path.exists(qr_image_path):
+                os.remove(qr_image_path)
+            qr_collection.delete_one({"_id": ObjectId(qr_id)})
+            return jsonify({"success": "QR code deleted successfully"}), 200
+        else:
+            return jsonify({"error": "QR code not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
